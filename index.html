@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pizarra IA</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1ef;--card:#fff;--ink:#1c2622;--mut:#5d6b65;--line:#d5dcd8;--btn:#1e3b33;--btnt:#fff;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#111815;--card:#1a221e;--ink:#e6ede9;--mut:#93a39b;--line:#2d3833;--btn:#9be3c1;--btnt:#10231c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif;padding:max(10px,env(safe-area-inset-top)) 12px 28px}
+main{max-width:860px;margin:0 auto}
+h1{font:700 2.4rem/1 Caveat,cursive;margin:10px 0 2px}
+.sub{margin:0 0 12px;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+textarea,input,select{width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:8px;padding:9px}
+textarea{min-height:62px;resize:vertical}
+button{font:inherit;font-weight:600;border:1px solid var(--btn);border-radius:8px;padding:9px 14px;background:var(--btn);color:var(--btnt);cursor:pointer}
+button.g{background:transparent;color:var(--ink);border-color:var(--line)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.row label{display:flex;gap:6px;align-items:center;color:var(--mut);font-size:.9rem}
+#board{width:100%;display:block;border-radius:8px;border:6px solid #8a6a43;background:radial-gradient(circle at 30% 20%,#27493f,#1b362e)}
+#cap{min-height:4.4em;margin:10px 2px 0}
+#msg{color:var(--mut);font-size:.9rem}
+.d{stroke-dasharray:1;stroke-dashoffset:1;animation:dr var(--t,1s) ease var(--d,0s) forwards}
+@keyframes dr{to{stroke-dashoffset:0}}
+.tx{opacity:0;font-family:Caveat,'Comic Sans MS',cursive;font-weight:700;animation:fi .7s ease var(--d,0s) forwards}
+@keyframes fi{to{opacity:1}}
+summary{cursor:pointer;color:var(--mut)}
+a{color:inherit}
+[hidden]{display:none!important}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.d,.tx{animation-duration:.01s}}
+.qb{display:block;width:100%;text-align:left;margin-top:6px}
+.qb.ok{background:#16a34a;color:#fff;border-color:#16a34a}
+.qb.no{background:#dc2626;color:#fff;border-color:#dc2626}
+.qb:disabled{cursor:default}
+#print{display:none}
+#print svg{width:100%;max-width:520px;display:block;border-radius:6px}
+#print .blk{break-inside:avoid;margin:0 0 14px}
+#print .d{animation:none;stroke-dashoffset:0}
+#print .tx{animation:none;opacity:1}
+@media print{body>*:not(#print){display:none!important}#print{display:block;color:#000}body{background:#fff;color:#000;padding:0}svg{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<main>
+<h1>Pizarra IA</h1>
+<p class="sub">Escribe un tema. Te lo explico en voz alta mientras dibujo.</p>
+
+<div class="card">
+<textarea id="q" placeholder="Ej: ¿Qué son los divisores de cero en C[0,1]?"></textarea>
+<div class="row"><button id="go">Explicar</button><button class="g" id="demo">Ver demo sin clave</button><span id="msg"></span></div>
+</div>
+
+<div class="card">
+<svg id="board" viewBox="0 0 800 500" role="img" aria-label="Pizarra"></svg>
+<div id="cap" aria-live="polite"></div>
+<div id="quiz"></div>
+<div class="row">
+<button class="g" id="pv" aria-label="Paso anterior">&#9664;</button>
+<button id="pp">&#9654; Reproducir</button>
+<button class="g" id="nx" aria-label="Paso siguiente">&#9654;|</button>
+<span id="pos"></span><button class="g" id="mic">&#127908; Preguntar</button>
+</div>
+<div class="row">
+<label>Velocidad <input id="rate" type="range" min=".7" max="1.4" step=".1" value="1" style="width:110px"></label>
+<label>Voz <select id="vz" style="width:auto;max-width:200px"></select></label>
+<label><input type="checkbox" id="hf" style="width:auto"> Manos libres: di &laquo;oye&raquo; (experimental)</label>
+<button class="g" id="pdf">Apuntes en PDF</button>
+</div>
+</div>
+
+<details class="card">
+<summary>Ajustes: clave gratis de Gemini</summary>
+<p>Crea una clave gratis en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> y pégala aquí. Se guarda solo en este navegador.</p>
+<input id="key" type="password" placeholder="Clave de Gemini" autocomplete="off">
+<div class="row"><label style="width:100%">Modelo <input id="model" value="gemini-2.5-flash"></label></div>
+</details>
+<details class="card" id="histbox"><summary>Historial de clases</summary><div id="hl"></div></details>
+</main>
+<section id="print"></section>
+
+<script>
+const $=s=>document.querySelector(s),NS='http://www.w3.org/2000/svg';
+const COL={ink:'#f4f1e8',blue:'#8ecae6',green:'#9be3c1',red:'#ff9ab0',orange:'#ffb26b',purple:'#c4a7ff',yellow:'#f6d365'};
+const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k)||'';localStorage.setItem(k,v)}catch(e){}return''};
+let L=null,i=0,run=false,tok=0,Q=false,ended=false,busy=false,onEnd=null,cur=null,ansd={},qz={n:0,ok:0};
+const el=(n,a)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e};
+const num=v=>+v||0, rate=()=>+$('#rate').value||1, msg=t=>{$('#msg').textContent=t;if(t)$('#cap').textContent=t};
+
+const SYS=`Eres un profesor paciente que explica en una pizarra, como un tutor con voz. Responde en el idioma de la pregunta y SOLO con JSON: {"title":string,"steps":[{"say":string,"new":boolean,"draw":[...]}]}.
+Reglas: 6 a 9 pasos. "say" es lo que dices en voz alta: 1 a 3 frases cortas, tono cercano, sin simbolos raros (di "x al cuadrado", "un medio"). Incluye siempre una analogia cotidiana, un ejemplo concreto y termina con un resumen.
+Pizarra de 800x500 (x hacia la derecha, y hacia abajo). "new":true limpia la pizarra (usalo en el primer paso y al cambiar de idea). Cada paso dibuja 1 a 5 elementos sin que se encimen, con margen de 30.
+Elementos: {"t":"text","x":n,"y":n (linea base),"s":"texto, \\n para salto","z":26-38,"c":color}; {"t":"line","x1","y1","x2","y2","c"}; {"t":"arrow", igual que line}; {"t":"rect","x","y","w","h","c"}; {"t":"circle","x","y","r","c"}; {"t":"plot","e":"expresion en x con * y ** y funciones Math, ej. x<=0.5?0.5-x:0","a":inicio,"b":fin,"x":60,"y":90,"w":680,"h":300,"ymin","ymax","c","ax":0 para no repetir ejes}.
+Colores: ink, blue, green, red, orange, purple, yellow. Cada linea de texto tiene maximo 40 caracteres. Usa dibujos simples (casas, cajas, balanzas, flechas) para las analogias y graficas cuando haya funciones.`;
+const QZ=`
+Cada 2 o 3 pasos agrega un paso de cuestionario: {"say":"lee la pregunta y las opciones como A, B, C","quiz":{"q":string,"opts":[3 o 4 textos cortos],"a":indice correcto desde 0,"why":"explicacion breve"}}.`;
+
+const DEMO={title:'Divisores de cero en C[0,1]',steps:[
+{say:'Imagina C de cero a uno como el conjunto de curvas que se dibujan sin levantar el lapiz. Vamos a mirar dos de ellas.',new:true,draw:[{t:'text',x:40,y:70,s:'C[0,1]: funciones continuas',z:40,c:'yellow'},{t:'text',x:40,y:130,s:'se dibujan sin levantar el lapiz',z:30,c:'ink'}]},
+{say:'La primera, f, vale un medio menos x hasta la mitad del intervalo. Despues se pega al eje y vale cero.',new:true,draw:[{t:'plot',e:'x<=0.5?0.5-x:0',a:0,b:1,x:60,y:90,w:680,h:300,ymin:0,ymax:0.6,c:'blue'},{t:'text',x:90,y:130,s:'f(x)',z:34,c:'blue'},{t:'text',x:55,y:425,s:'0',z:28},{t:'text',x:385,y:425,s:'1/2',z:28},{t:'text',x:730,y:425,s:'1',z:28}]},
+{say:'La segunda, g, hace lo contrario. Es cero en la primera mitad, y desde un medio sube como una rampa.',draw:[{t:'plot',e:'x<=0.5?0:x-0.5',a:0,b:1,x:60,y:90,w:680,h:300,ymin:0,ymax:0.6,c:'green',ax:0},{t:'text',x:620,y:130,s:'g(x)',z:34,c:'green'}]},
+{say:'Piensa en una casa con dos cuartos y dos interruptores. f prende la luz del cuarto izquierdo, y g la del derecho. Nunca estan prendidas las dos a la vez.',new:true,draw:[{t:'rect',x:80,y:120,w:300,h:220,c:'blue'},{t:'rect',x:420,y:120,w:300,h:220,c:'green'},{t:'circle',x:230,y:200,r:30,c:'yellow'},{t:'text',x:150,y:300,s:'aqui manda f',z:34,c:'blue'},{t:'text',x:490,y:300,s:'aqui manda g',z:34,c:'green'}]},
+{say:'Pregunta rapida. Si f vale cero en la mitad derecha, que vale f por g ahi? A: cero. B: un medio. C: depende de g.',quiz:{q:'Si f = 0 en [1/2, 1], cuanto vale f.g ahi?',opts:['Cero','Un medio','Depende de g'],a:0,why:'Cero por cualquier numero da cero, no importa cuanto valga g.'},draw:[]},
+{say:'Ahora multiplicamos punto a punto. En la izquierda g vale cero, asi que f por g da cero. En la derecha f vale cero, y otra vez el producto es cero.',new:true,draw:[{t:'text',x:50,y:110,s:'En [0, 1/2]:  g = 0  =>  f.g = 0',z:36,c:'blue'},{t:'text',x:50,y:200,s:'En [1/2, 1]:  f = 0  =>  f.g = 0',z:36,c:'green'}]},
+{say:'Conclusion: f no es cero, g no es cero, pero su producto es la funcion cero en todo el intervalo. Por eso C de cero a uno tiene divisores de cero, algo que no pasa con los numeros reales.',draw:[{t:'text',x:50,y:320,s:'f \u2260 0,  g \u2260 0,  pero  f.g = 0',z:40,c:'yellow'},{t:'arrow',x1:60,y1:345,x2:400,y2:345,c:'orange'},{t:'text',x:50,y:410,s:'C[0,1] tiene divisores de cero',z:34,c:'red'}]}
+]};
+
+/* ---------- dibujo ---------- */
+function dp(d,c,dl,du,w){const p=el('path',{d,pathLength:1,fill:'none',stroke:COL[c]||COL.ink,'stroke-width':w||3.5,'stroke-linecap':'round','stroke-linejoin':'round','class':'d'});p.style.setProperty('--d',(Q?0:dl)+'s');p.style.setProperty('--t',(Q?.01:du)+'s');return p}
+function mk(e){e=String(e).replace(/\^/g,'**');
+ const bad=e.replace(/[a-z_]\w*/gi,m=>(m==='x'||Math.hasOwnProperty(m))?'':'#');
+ if(/[^0-9+\-*\/().,<>=?:&|! \t]/.test(bad))throw new Error('expr');
+ return new Function('x','with(Math){return '+e+'}')}
+function plot(it,dl){
+ const g=el('g',{}),a=num(it.a),b=it.b==null?1:num(it.b),X=it.x==null?60:num(it.x),Y=it.y==null?90:num(it.y),W=num(it.w)||680,H=num(it.h)||300;
+ let f;try{f=mk(it.e)}catch(e){return g}
+ const ys=[];for(let k=0;k<=140;k++){let y;try{y=f(a+(b-a)*k/140)}catch(e){y=NaN}ys.push(Number.isFinite(y)?y:NaN)}
+ const fin=ys.filter(Number.isFinite);
+ const lo=it.ymin!=null?num(it.ymin):Math.min(0,...fin);let hi=it.ymax!=null?num(it.ymax):Math.max(0,...fin);
+ if(!(hi>lo))hi=lo+1;
+ const px=x=>X+(x-a)/((b-a)||1)*W,py=y=>Y+H-(Math.max(lo,Math.min(hi,y))-lo)/(hi-lo)*H;
+ if(it.ax!==0)g.appendChild(dp(`M${X} ${py(0)}h${W}M${X} ${Y}v${H}`,'ink',dl,.8,2.5));
+ let d='',pen=false;
+ ys.forEach((y,k)=>{if(Number.isFinite(y)){d+=(pen?'L':'M')+px(a+(b-a)*k/140).toFixed(1)+' '+py(y).toFixed(1);pen=true}else pen=false});
+ if(d)g.appendChild(dp(d,it.c||'blue',dl+.3,1.8,5));
+ return g}
+function drawItem(it,dl){
+ const c=it.c;
+ switch(it.t){
+ case 'text':{const z=num(it.z)||30,tx=el('text',{x:num(it.x),y:num(it.y),'font-size':z,fill:COL[c]||COL.ink,'class':'tx'});
+  String(it.s).split('\n').forEach((ln,k)=>{const s=el('tspan',{x:num(it.x),dy:k?z*1.15:0});s.textContent=ln;tx.appendChild(s)});
+  tx.style.setProperty('--d',(Q?0:dl)+'s');if(Q)tx.style.animationDuration='.01s';return tx}
+ case 'line':return dp(`M${num(it.x1)} ${num(it.y1)}L${num(it.x2)} ${num(it.y2)}`,c,dl,.8);
+ case 'arrow':{const x1=num(it.x1),y1=num(it.y1),x2=num(it.x2),y2=num(it.y2),a=Math.atan2(y2-y1,x2-x1),h=16;
+  return dp(`M${x1} ${y1}L${x2} ${y2}M${x2-h*Math.cos(a-.5)} ${y2-h*Math.sin(a-.5)}L${x2} ${y2}L${x2-h*Math.cos(a+.5)} ${y2-h*Math.sin(a+.5)}`,c,dl,.9)}
+ case 'rect':{const x=num(it.x),y=num(it.y),w=num(it.w),h=num(it.h);return dp(`M${x} ${y}h${w}v${h}h${-w}z`,c,dl,1.1)}
+ case 'circle':{const x=num(it.x),y=num(it.y),r=num(it.r)||30;return dp(`M${x-r} ${y}a${r} ${r} 0 1 0 ${2*r} 0a${r} ${r} 0 1 0 ${-2*r} 0`,c,dl,1)}
+ case 'plot':return plot(it,dl)
+ }
+}
+function render(k,quick){
+ const svg=$('#board');let st=0;
+ for(let j=k;j>0;j--)if(L.steps[j].new){st=j;break}
+ svg.innerHTML='';
+ for(let j=st;j<=k;j++){
+  Q=!!quick||j<k;const s=L.steps[j],it=s.draw||[],dur=Math.max(2,(s.say||'').length*.07/rate());
+  it.forEach((d,m)=>{let e;try{e=drawItem(d,.3+m*dur*.55/it.length)}catch(x){}if(e)svg.appendChild(e)})
+ }
+ Q=false;$('#cap').textContent=L.steps[k].say||'';$('#pos').textContent=(k+1)+'/'+L.steps.length;showQuiz(k)}
+
+/* ---------- voz y reproduccion ---------- */
+function voices(){const v=speechSynthesis.getVoices().filter(x=>/^es/i.test(x.lang));$('#vz').innerHTML=v.map(x=>`<option>${x.name}</option>`).join('')||'<option>Voz por defecto</option>'}
+function voice(){const n=$('#vz').value;return speechSynthesis.getVoices().find(x=>x.name===n)}
+if('speechSynthesis' in window){voices();speechSynthesis.onvoiceschanged=voices}
+function unlock(){try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}}
+function halt(){tok++;try{speechSynthesis.cancel()}catch(e){}}
+function say(txt,cb){
+ const my=++tok;let fired=false,t;
+ const fin=()=>{if(fired||my!==tok)return;fired=true;clearTimeout(t);cb()};
+ t=setTimeout(fin,txt.length*95/rate()+4000);
+ if(!('speechSynthesis' in window)){clearTimeout(t);t=setTimeout(fin,txt.length*70/rate());return}
+ speechSynthesis.cancel();
+ const u=new SpeechSynthesisUtterance(txt),v=voice();u.lang='es-ES';
+ if(v){u.voice=v;u.lang=v.lang}
+ u.rate=rate();u.onend=fin;u.onerror=fin;speechSynthesis.speak(u)}
+function setBtn(){$('#pp').innerHTML=run?'&#10074;&#10074; Pausa':'&#9654; Reproducir'}
+function go(k){
+ if(!run)return;
+ if(k>=L.steps.length){run=false;ended=true;setBtn();if(onEnd){const f=onEnd;onEnd=null;f()}else if(qz.n)msg('Cuestionario: '+qz.ok+' de '+qz.n+' correctas');return}
+ i=k;render(k);
+ const s=L.steps[k];say(s.say||'',()=>{if(!(s.quiz&&Array.isArray(s.quiz.opts)))setTimeout(()=>go(k+1),450)})}
+function start(lesson,h){halt();L=lesson;i=0;ended=false;busy=false;onEnd=null;ansd={};qz={n:0,ok:0};
+ cur=h||{id:Date.now(),title:lesson.title||'Clase',date:new Date().toLocaleString(),lesson,qa:[],quiz:[]};
+ save();$('#quiz').innerHTML='';run=true;setBtn();startHF();go(0)}
+function jump(k){k=Math.max(0,Math.min(L.steps.length-1,k));halt();ended=false;i=k;if(run)go(k);else render(k,true)}
+
+$('#pp').onclick=()=>{if(!L||busy)return;unlock();
+ if(run){run=false;halt();stopHF()}else{if(ended){i=0;ended=false}run=true;startHF();go(i)}
+ setBtn()};
+$('#pv').onclick=()=>L&&jump(i-1);
+$('#nx').onclick=()=>L&&jump(i+1);
+$('#demo').onclick=()=>{unlock();msg('');start(DEMO)};
+
+/* ---------- Gemini ---------- */
+async function ask(q,sys){
+ const key=$('#key').value.trim(),model=$('#model').value.trim()||'gemini-2.5-flash';
+ if(!key){$('details').open=true;throw new Error('pega primero tu clave gratis de Gemini en Ajustes.')}
+ ls('gk',key);ls('gm',model);
+ const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+  method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},
+  body:JSON.stringify({systemInstruction:{parts:[{text:sys||SYS+QZ}]},contents:[{role:'user',parts:[{text:q}]}],generationConfig:{responseMimeType:'application/json',temperature:.7}})});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+ const t=((j.candidates||[])[0]?.content?.parts||[]).map(p=>p.text||'').join('').replace(/^```json|```$/g,'').trim();
+ const les=JSON.parse(t);
+ if(!les||!Array.isArray(les.steps)||!les.steps.length)throw new Error('la respuesta no tuvo el formato esperado, intenta de nuevo.');
+ return les}
+$('#go').onclick=async()=>{
+ const q=$('#q').value.trim();if(!q)return msg('Escribe un tema o pregunta.');
+ unlock();msg('Preparando la clase...');
+ try{start(await ask(q));msg('')}catch(e){msg('Error: '+e.message)}};
+
+/* ---------- cuestionario ---------- */
+function showQuiz(k){
+ const box=$('#quiz'),z=L.steps[k].quiz;box.innerHTML='';if(!z||!Array.isArray(z.opts))return;
+ z.opts.forEach((o,j)=>{const b=document.createElement('button');b.className='g qb';b.textContent=String.fromCharCode(65+j)+') '+o;b.onclick=()=>pick(k,j);box.appendChild(b)});
+ if(ansd[k]!==undefined)mark(k)}
+function mark(k){const z=L.steps[k].quiz,j=ansd[k];[...$('#quiz').children].forEach((b,m)=>{b.disabled=true;if(m===z.a)b.classList.add('ok');else if(m===j)b.classList.add('no')})}
+function pick(k,j){
+ if(ansd[k]!==undefined)return;const z=L.steps[k].quiz,ok=j===z.a;ansd[k]=j;qz.n++;if(ok)qz.ok++;
+ cur.quiz.push({q:z.q,opts:z.opts,a:z.a,u:j,why:z.why||''});save();mark(k);
+ const fb=(ok?'Correcto. ':'No exactamente. La respuesta era '+z.opts[z.a]+'. ')+(z.why||'');
+ $('#cap').textContent=fb;say(fb,()=>{if(run)setTimeout(()=>go(k+1),450)})}
+
+/* ---------- interrumpir y preguntar ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let hr=null;
+function startHF(){if(!SR||!$('#hf').checked||hr||busy||!run)return;
+ hr=new SR();hr.lang='es-ES';hr.continuous=true;
+ hr.onresult=e=>{for(let k=e.resultIndex;k<e.results.length;k++)if(e.results[k].isFinal&&/\b(oye|espera|detente)\b/i.test(e.results[k][0].transcript)){stopHF();interrupt();return}};
+ hr.onend=()=>{hr=null;setTimeout(startHF,300)};
+ try{hr.start()}catch(e){hr=null}}
+function stopHF(){if(hr){const r=hr;hr=null;r.onend=null;try{r.abort()}catch(e){}}}
+function interrupt(){
+ if(!L||busy||onEnd)return;busy=true;unlock();run=false;halt();stopHF();setBtn();
+ if(!SR){const q=prompt('Escribe tu pregunta:');return q?answer(q):resume()}
+ msg('Te escucho... habla ahora');let got=false;const r=new SR();r.lang='es-ES';
+ r.onresult=e=>{got=true;answer(e.results[0][0].transcript)};
+ r.onerror=e=>msg('No te escuche ('+e.error+')');
+ r.onend=()=>{if(!got)resume()};
+ try{r.start()}catch(e){resume()}}
+function resume(){busy=false;msg('');run=true;setBtn();startHF();go(i)}
+async function answer(q){
+ msg('Pregunta: '+q);
+ try{
+  const ctx=L.steps.slice(Math.max(0,i-2),i+1).map(s=>s.say).join(' ');
+  const les=await ask('Tema: '+L.title+'. Lo que explicabas: '+ctx+'. El alumno te interrumpe y pregunta: '+q+'. Responde su pregunta en 2 a 4 pasos cortos, con new:true en el primero, sin cuestionarios.',SYS.replace('6 a 9 pasos','2 a 4 pasos'));
+  cur.qa.push({q,a:les.steps.map(s=>s.say).join(' ')});save();
+  const back={L,i};
+  onEnd=()=>{L=back.L;i=back.i;ended=false;run=true;setBtn();startHF();render(i,true);go(i)};
+  busy=false;L=les;i=0;run=true;setBtn();msg('');go(0)
+ }catch(e){msg('Error: '+e.message);resume()}}
+$('#mic').onclick=interrupt;
+$('#hf').disabled=!SR;$('#hf').onchange=()=>$('#hf').checked?startHF():stopHF();
+
+/* ---------- historial y apuntes ---------- */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';');
+const H=()=>{try{return JSON.parse(ls('hist')||'[]')}catch(e){return[]}};
+function save(){if(!cur||cur.lesson===DEMO)return;const h=H().filter(x=>x.id!==cur.id);h.unshift(cur);ls('hist',JSON.stringify(h.slice(0,30)));drawHist()}
+function drawHist(){
+ const h=H(),box=$('#hl');box.innerHTML=h.length?'':'<p>Aun no hay clases guardadas. Se guardan solas.</p>';
+ h.forEach(x=>{const d=document.createElement('div');d.className='row';
+  d.innerHTML=`<b style="flex:1;min-width:150px">${esc(x.title)}<br><small>${esc(x.date)}</small></b>`;
+  [['Repetir',()=>start(x.lesson,x)],['PDF',()=>pdf(x)],['Borrar',()=>{ls('hist',JSON.stringify(H().filter(y=>y.id!==x.id)));drawHist()}]].forEach(([t,f])=>{const b=document.createElement('button');b.className='g';b.textContent=t;b.onclick=f;d.appendChild(b)});
+  box.appendChild(d)})}
+function snap(les,k){
+ const s=el('svg',{viewBox:'0 0 800 500'});s.appendChild(el('rect',{width:800,height:500,fill:'#1e3b33'}));
+ let st=0;for(let j=k;j>0;j--)if(les.steps[j].new){st=j;break}
+ Q=true;for(let j=st;j<=k;j++)(les.steps[j].draw||[]).forEach(d=>{try{const e=drawItem(d,0);if(e)s.appendChild(e)}catch(x){}});Q=false;
+ return s.outerHTML}
+function pdf(h){
+ const les=h.lesson;let t=`<h1>${esc(h.title)}</h1><p>${esc(h.date)}</p>`;
+ les.steps.forEach((s,k)=>{if(s.quiz)return;t+=`<div class="blk">${(s.draw&&s.draw.length)?snap(les,k):''}<p>${esc(s.say||'')}</p></div>`});
+ if(h.quiz&&h.quiz.length){t+='<h2>Cuestionario</h2>';h.quiz.forEach(z=>t+=`<p><b>${esc(z.q)}</b><br>Tu respuesta: ${esc(z.opts[z.u])} ${z.u===z.a?'(correcta)':'(incorrecta, era '+esc(z.opts[z.a])+')'}<br>${esc(z.why)}</p>`)}
+ if(h.qa&&h.qa.length){t+='<h2>Mis preguntas</h2>';h.qa.forEach(x=>t+=`<p><b>${esc(x.q)}</b><br>${esc(x.a)}</p>`)}
+ $('#print').innerHTML=t;setTimeout(()=>window.print(),300)}
+$('#pdf').onclick=()=>cur?pdf(cur):msg('Primero inicia una clase.');
+drawHist();
+
+$('#key').value=ls('gk');if(ls('gm'))$('#model').value=ls('gm');
+</script>
+</body>
+</html>
